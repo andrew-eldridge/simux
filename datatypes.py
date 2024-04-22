@@ -4,6 +4,8 @@ datatypes.py
 Custom type definitions
 """
 
+from __future__ import annotations
+
 import heapq
 from itertools import count
 from enum import Enum
@@ -29,6 +31,19 @@ class Priority(Enum):
         return NotImplemented
 
 
+class AssignType(str, Enum):
+    VARIABLE = 'VARIABLE'
+    ATTRIBUTE = 'ATTRIBUTE'
+    ENTITY_TYPE = 'ENTITY TYPE'
+
+
+@dataclass
+class Assignment:
+    assign_type: AssignType
+    assign_name: str
+    assign_value: Optional[object]
+
+
 @dataclass
 class Entity:
     entity_type: str
@@ -42,7 +57,7 @@ class Event:
     event_time: float
     event_name: str
     event_message: str
-    event_handler: Callable
+    event_handler: Callable[[Event, dict, dict], List[Event]]
     event_entity: Entity
     attr: dict = field(default_factory=dict)
 

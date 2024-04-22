@@ -19,11 +19,13 @@ class Module(ABC):
     name: str
 
     @abstractmethod
-    def process_event(self, event: Event) -> Tuple[List[Event], dict]:
+    def process_event(self, event: Event, sys_var: dict, sys_entity_attr: dict) -> List[Event]:
         """
         Process module event and pass entity to next module in the chain
 
         :param event: event to process
+        :param sys_var: system global variables
+        :param sys_entity_attr: system global entity attributes
         """
         ...
 
@@ -49,6 +51,20 @@ class IngestModule(Module):
         :param ingest_time: system time at ingest event
         """
         ...
+
+
+def update_sys_entity_attr(sys_entity_attr: dict, entity_ind: int, updated_attr: dict):
+    """
+    Update system global entity attributes on target entity from attr update dictionary
+
+    :param sys_entity_attr: system global entity attributes
+    :param entity_ind: entity index to update
+    :param updated_attr: attr update dictionary
+    """
+
+    if entity_ind not in sys_entity_attr:
+        sys_entity_attr[entity_ind] = {}
+    sys_entity_attr[entity_ind].update(updated_attr)
 
 
 @dataclass
@@ -84,19 +100,23 @@ class CreateModule(ArrivalModule):
             ))
         return arrival_events
 
-    def process_event(self, event: Event) -> Tuple[List[Event], dict]:
+    def process_event(self, event: Event, sys_var: dict, sys_entity_attr: dict) -> List[Event]:
         """
         Process event at Create Module, pass to next module
 
         :param event: event to process
+        :param sys_var: system global variables
+        :param sys_entity_attr: system global entity attributes
         """
 
         logging.debug(event)
 
-        return self.next_module.ingest_entity(event.event_entity, event.event_time), {
+        update_sys_entity_attr(sys_entity_attr, event.event_entity.entity_ind, {
             'create_time': event.event_time,
-            f'create_{self.module_ind}_time': event.event_time
-        }
+            f'create_{self.module_ind}_exit_time': event.event_time
+        })
+
+        return self.next_module.ingest_entity(event.event_entity, event.event_time)
 
 
 @dataclass
@@ -127,18 +147,22 @@ class SeizeModule(IngestModule):
                 event_entity=entity
             )]
 
-    def process_event(self, event: Event) -> Tuple[List[Event], dict]:
+    def process_event(self, event: Event, sys_var: dict, sys_entity_attr: dict) -> List[Event]:
         """
         Process event at Seize Module, pass to next module
 
         :param event: event to process
+        :param sys_var: system global variables
+        :param sys_entity_attr: system global entity attributes
         """
 
         logging.debug(event)
 
-        return self.next_module.ingest_entity(event.event_entity, event.event_time), {
-            f'seize_{self.module_ind}_time': event.event_time
-        }
+        update_sys_entity_attr(sys_entity_attr, event.event_entity.entity_ind, {
+            f'seize_{self.module_ind}_exit_time': event.event_time
+        })
+
+        return self.next_module.ingest_entity(event.event_entity, event.event_time)
 
 
 @dataclass
@@ -163,18 +187,22 @@ class DelayModule(IngestModule):
             event_entity=entity
         )]
 
-    def process_event(self, event: Event) -> Tuple[List[Event], dict]:
+    def process_event(self, event: Event, sys_var: dict, sys_entity_attr: dict) -> List[Event]:
         """
         Process event at Delay Module, pass to next module
 
         :param event: event to process
+        :param sys_var: system global variables
+        :param sys_entity_attr: system global entity attributes
         """
 
         logging.debug(event)
 
-        return self.next_module.ingest_entity(event.event_entity, event.event_time), {
-            f'delay_{self.module_ind}_time': event.event_time
-        }
+        update_sys_entity_attr(sys_entity_attr, event.event_entity.entity_ind, {
+            f'delay_{self.module_ind}_exit_time': event.event_time
+        })
+
+        return self.next_module.ingest_entity(event.event_entity, event.event_time)
 
 
 @dataclass
@@ -208,18 +236,79 @@ class ReleaseModule(IngestModule):
         ))
         return events
 
-    def process_event(self, event: Event) -> Tuple[List[Event], dict]:
+    def process_event(self, event: Event, sys_var: dict, sys_entity_attr: dict) -> List[Event]:
         """
         Process event at Release Module, pass to next module
 
         :param event: event to process
+        :param sys_var: system global variables
+        :param sys_entity_attr: system global entity attributes
         """
 
         logging.debug(event)
 
-        return self.next_module.ingest_entity(event.event_entity, event.event_time), {
-            f'release_{self.module_ind}_time': event.event_time
-        }
+        update_sys_entity_attr(sys_entity_attr, event.event_entity.entity_ind, {
+            f'release_{self.module_ind}_exit_time': event.event_time
+        })
+
+        return self.next_module.ingest_entity(event.event_entity, event.event_time)
+
+
+@dataclass
+class AssignModule(IngestModule):
+    next_module: IngestModule
+    assignments: List[Assignment]
+    module_ind: int = field(default_factory=count().__next__)
+
+    def ingest_entity(self, entity: Entity, ingest_time: float) -> List[Event]:
+        """
+        Perform given assignments
+
+        :param entity: ingested entity
+        :param ingest_time: system time at ingest event
+        """
+
+        assignments_str_lst = [f'[{assignment.assign_type.value}]' for assignment in self.assignments]
+        for assignment in self.assignments:
+            if assignment.assign_type == AssignType.ENTITY_TYPE:
+                assignments_str_lst.append(f'[ENTITY TYPE] {assignment.assign_name}')
+            else:
+                assignments_str_lst.append(f'[{assignment.assign_type.value}] {assignment.assign_name}:{assignment.assign_value}')
+        assignments_str = ', '.join(assignments_str_lst)
+        assign_event_msg = f'{entity.entity_type} {entity.entity_ind} entity performed assignments: {assignments_str}'
+
+        return [Event(
+            event_time=ingest_time,
+            event_name='Assign',
+            event_message=assign_event_msg,
+            event_handler=self.process_event,
+            event_entity=entity
+        )]
+
+    def process_event(self, event: Event, sys_var: dict, sys_entity_attr: dict) -> List[Event]:
+        """
+        Process event at Assign Module, pass to next module
+
+        :param event: event to process
+        :param sys_var: system global variables
+        :param sys_entity_attr: system global entity attributes
+        """
+
+        logging.debug(event)
+
+        sys_entity_attr_updates = {}
+        for assignment in self.assignments:
+            if assignment.assign_type == AssignType.VARIABLE:
+                sys_entity_attr_updates[assignment.assign_name] = assignment.assign_value
+            elif assignment.assign_type == AssignType.ATTRIBUTE:
+                event.event_entity.attr[assignment.assign_name] = assignment.assign_value
+            elif assignment.assign_type == AssignType.ENTITY_TYPE:
+                event.event_entity.entity_type = assignment.assign_name
+
+        sys_entity_attr_updates[f'assign_{self.module_ind}_exit_time'] = event.event_time
+        update_sys_entity_attr(sys_entity_attr, event.event_entity.entity_ind, sys_entity_attr_updates)
+
+        return self.next_module.ingest_entity(event.event_entity, event.event_time)
 
 
 @dataclass
@@ -242,16 +331,20 @@ class DisposeModule(IngestModule):
             event_entity=entity
         )]
 
-    def process_event(self, event: Event) -> Tuple[List[Event], dict]:
+    def process_event(self, event: Event, sys_var: dict, sys_entity_attr: dict) -> List[Event]:
         """
         Process event at Dispose Module, pass to next module
 
         :param event: event to process
+        :param sys_var: system global variables
+        :param sys_entity_attr: system global entity attributes
         """
 
         logging.debug(event)
 
-        return [], {
-            f'dispose_{self.module_ind}_time': event.event_time,
+        update_sys_entity_attr(sys_entity_attr, event.event_entity.entity_ind, {
+            f'dispose_{self.module_ind}_exit_time': event.event_time,
             'dispose_time': event.event_time
-        }
+        })
+
+        return []

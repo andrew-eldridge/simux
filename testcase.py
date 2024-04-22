@@ -45,6 +45,13 @@ if __name__ == '__main__':
         arrival_modules=[create_mod]
     )
     sim_duration = 100
-    env.run_simulation(sim_duration)
+    sys_var, sys_entity_attr_df = env.run_simulation(sim_duration)
+
+    # system metric outputs
+    print(sys_entity_attr_df.head())
+    print(sys_entity_attr_df.shape)
+    print('total entity system time', sys_var['total_entity_system_time'])
+
+    # resource metric outputs
     resource_utilization = server_resource.calc_utilization(sim_duration)
     print('server resource utilization', resource_utilization)
