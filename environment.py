@@ -21,43 +21,27 @@ from datatypes import *
 @dataclass
 class Environment:
     root_modules: List[CreateModule] = field(default_factory=list)
-    event_queue: List[tuple[float, Event]] = field(default_factory=list)
+    event_queue: List[tuple[float, int, Event]] = field(default_factory=list)
     resources: dict[str, Resource] = field(default_factory=dict)
+    total_entity_system_time: float = 0.
+    total_resource_utilization_time: float = 0.
+
+    def run_simulation(self, duration: float):
+        self.__populate_event_queue_arrivals(duration)
+        while len(self.event_queue) != 0 and self.event_queue[0][2].event_time <= duration:
+            curr_event_time, _, curr_event = heapq.heappop(self.event_queue)
+            new_events: List[Event] = curr_event.event_handler(curr_event)
+            for event in new_events:
+                self.add_event(event)
+
+    def __populate_event_queue_arrivals(self, end_time: float):
+        for root_mod in self.root_modules:
+            arrival_events = root_mod.generate_arrivals(end_time)
+            for event in arrival_events:
+                self.add_event(event)
 
     def add_event(self, event: Event):
-        heapq.heappush(self.event_queue, (event.event_time, event))
+        heapq.heappush(self.event_queue, (event.event_time, event.event_entity.entity_id, event))
 
     def add_resource(self, resource: Resource):
         self.resources[resource.name] = resource
-
-
-if __name__ == '__main__':
-    server_resource = Resource(
-        name='Server',
-        capacity=3
-    )
-
-    create_mod = CreateModule(
-        name='Test Create',
-        next_module=SeizeModule(
-            name='Test Seize',
-            next_module=DelayModule(
-                name='Test Delay',
-                next_module=ReleaseModule(
-                    name='Test Release',
-                    next_module=DisposeModule(
-                        name='Test Dispose'
-                    ),
-                    resource=server_resource,
-                    num_resources=1
-                ),
-                delay_generator=lambda: 1.
-            ),
-            resource=server_resource,
-            num_resources=1
-        ),
-        gen_entity_type='Test',
-        arrival_generator=generators.exp_generator(1.)
-    )
-
-    create_mod.generate_arrivals(100)
