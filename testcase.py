@@ -4,12 +4,15 @@ testcase.py
 Full test case for a simple simulation environment
 """
 
+import logging
 from generators import exp_agg_generator, exp_generator
 from modules import *
 from environment import Environment
 
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG)
+
     server_resource = Resource(
         name='Server',
         capacity=3
@@ -39,6 +42,9 @@ if __name__ == '__main__':
     )
 
     env = Environment(
-        root_modules=[create_mod]
+        arrival_modules=[create_mod]
     )
-    env.run_simulation(100)
+    sim_duration = 100
+    env.run_simulation(sim_duration)
+    resource_utilization = server_resource.calc_utilization(sim_duration)
+    print('server resource utilization', resource_utilization)
