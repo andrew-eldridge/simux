@@ -160,6 +160,6 @@ class Resource:
 
         resource_utilization = 0
         for (t1, a1), (t2, _) in zip(self.availability_log, self.availability_log[1:]):
-            resource_utilization += (t2 - t1) * a1
+            resource_utilization += (t2 - t1) * (self.capacity - a1)
         max_utilization = self.capacity * duration
         return resource_utilization / max_utilization

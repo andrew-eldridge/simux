@@ -207,7 +207,7 @@ def testcase_4() -> Tuple[Environment, List[Resource]]:
                     num_resources=1,
                     next_module=DelayModule(
                         name='Delay 1',
-                        delay_generator=exp_generator(0.5),
+                        delay_generator=exp_generator(1),
                         next_module=ReleaseModule(
                             name='Release Server 1',
                             resource=server1,
@@ -239,8 +239,9 @@ def testcase_4() -> Tuple[Environment, List[Resource]]:
         module_chains=[mod_chain],
         variables=[('last_entity', 0)]
     )
+    resources = [server1, server2]
 
-    return env, []
+    return env, resources
 
 
 def main():

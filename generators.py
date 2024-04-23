@@ -20,7 +20,7 @@ def exp_agg_generator(lambd: float) -> Callable[[float, float], Generator[float,
         time = start_time
         while time < end_time:
             u = random.uniform(0, 1)
-            time += -1 / lambd * math.log(u)
+            time += (-1 / lambd) * math.log(u)
             if time <= end_time:
                 yield time
 
@@ -36,7 +36,7 @@ def exp_generator(lambd: float) -> Generator[float, None, None]:
 
     while True:
         u = random.uniform(0, 1)
-        yield -1 / lambd * math.log(u)
+        yield (-1 / lambd) * math.log(u)
 
 
 def tria_agg_generator(low: float, high: float) -> Callable[[float, float], Generator[float, None, None]]:
