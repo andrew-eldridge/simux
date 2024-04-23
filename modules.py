@@ -53,15 +53,17 @@ class IngestModule(Module):
         ...
 
 
-def init_sys_var_entity(sys_var: dict, entity_ind: int):
+def init_sys_var_entity(sys_var: dict, entity_type: str, entity_ind: int):
     """
     Initialize entity entry in system global variables dict
 
     :param sys_var: system global variables
+    :param entity_type: entity type
     :param entity_ind: entity index
     """
 
     sys_var['entity']['metrics'][entity_ind] = {
+        'Entity Type': entity_type,
         'Value-Added Time': 0.,
         'Non-Value-Added Time': 0.,
         'Wait Time': 0.,
@@ -115,7 +117,7 @@ class CreateModule(ArrivalModule):
         logging.debug(event)
 
         event_entity_ind = event.event_entity.entity_ind
-        init_sys_var_entity(sys_var, event_entity_ind)
+        init_sys_var_entity(sys_var, event.event_entity.entity_type, event_entity_ind)
         sys_var['entity']['metrics'][event_entity_ind]['Created At'] = event.event_time
         sys_var['entity']['trace'][event_entity_ind].append((f'Exit {self.name}', event.event_time))
 
@@ -162,11 +164,15 @@ class SeizeModule(IngestModule):
 
         event_entity_ind = event.event_entity.entity_ind
         sys_var['entity']['trace'][event_entity_ind].append((f'Exit {self.name}', event.event_time))
+        if 'wait_time' in event.attr:
+            sys_var['entity']['metrics'][event_entity_ind]['Wait Time'] += event.attr['wait_time']
 
         if isinstance(event.event_entity, BatchEntity):
             for entity in event.event_entity.batched_entities:
                 entity_ind = entity.entity_ind
                 sys_var['entity']['trace'][entity_ind].append((f'Exit {self.name}', event.event_time))
+                if 'wait_time' in event.attr:
+                    sys_var['entity']['metrics'][entity_ind]['Wait Time'] += event.attr['wait_time']
 
         return self.next_module.ingest_entity(event.event_entity, event.event_time)
 
@@ -378,7 +384,7 @@ class DuplicateModule(IngestModule):
         sys_var['entity']['trace'][event_entity_ind].append((f'Exit {self.name}', event.event_time))
 
         dup_entity_ind = dup_entity.entity_ind
-        init_sys_var_entity(sys_var, dup_entity_ind)
+        init_sys_var_entity(sys_var, dup_entity.entity_type, dup_entity_ind)
         sys_var['entity']['metrics'][dup_entity_ind]['Created At'] = event.event_time
         sys_var['entity']['trace'][dup_entity_ind].append((f'Exit {self.name}', event.event_time))
 
@@ -425,14 +431,14 @@ class BatchModule(IngestModule):
 
             if needed_to_batch == 0:
                 # sufficient matches found in queue, remove matches from queue and return batch event
-                batch_entities: List[Entity] = [entity]
+                batch_entities: List[Tuple[Entity, float]] = [(entity, ingest_time)]
                 for i in match_indices:
-                    batch_entities.append(self.queue[i][0])
+                    batch_entities.append(self.queue[i])
                 for i in match_indices:
                     del self.queue[i]
 
                 event_msg = 'Batched entities: '
-                event_msg += ', '.join([f'{e.entity_type} {e.entity_ind}' for e in batch_entities])
+                event_msg += ', '.join([f'{e.entity_type} {e.entity_ind}' for e, _ in batch_entities])
                 return [Event(
                     event_time=ingest_time,
                     event_name='Batch',
@@ -449,14 +455,14 @@ class BatchModule(IngestModule):
                 return []
 
         elif self.batch_type == BatchType.ANY:
-            if len(self.queue) < self.batch_size - 1:
+            if len(self.queue) >= self.batch_size - 1:
                 # sufficient entities in queue, remove batch_size-1 items from queue and return batch event
-                batch_entities: List[Entity] = [entity]
+                batch_entities: List[Tuple[Entity, float]] = [(entity, ingest_time)]
                 for _ in range(self.batch_size - 1):
-                    batch_entities.append(self.queue.popleft()[0])
+                    batch_entities.append(self.queue.popleft())
 
                 event_msg = 'Batched entities: '
-                event_msg += ', '.join([f'{e.entity_type} {e.entity_ind}' for e in batch_entities])
+                event_msg += ', '.join([f'{e.entity_type} {e.entity_ind}' for e, _ in batch_entities])
                 return [Event(
                     event_time=ingest_time,
                     event_name='Batch',
@@ -488,16 +494,17 @@ class BatchModule(IngestModule):
         batch_entity = BatchEntity(
             entity_type=self.batch_entity_type or event.event_entity.entity_type,
             arrival_time=event.event_time,
-            batched_entities=event.attr['batch_entities']
+            batched_entities=[e for e, _ in event.attr['batch_entities']]
         )
 
         batch_entity_ind = batch_entity.entity_ind
-        init_sys_var_entity(sys_var, batch_entity_ind)
+        init_sys_var_entity(sys_var, batch_entity.entity_type, batch_entity_ind)
         sys_var['entity']['metrics'][batch_entity_ind]['Created At'] = event.event_time
         sys_var['entity']['trace'][batch_entity_ind].append((f'Exit {self.name}', event.event_time))
 
-        for entity in batch_entity.batched_entities:
+        for entity, queue_entry_time in event.attr['batch_entities']:
             entity_ind = entity.entity_ind
+            sys_var['entity']['metrics'][entity_ind]['Wait Time'] += (event.event_time - queue_entry_time)
             sys_var['entity']['trace'][entity_ind].append((f'Exit {self.name}', event.event_time))
 
         return self.next_module.ingest_entity(batch_entity, event.event_time)
@@ -550,6 +557,53 @@ class SeparateModule(IngestModule):
             next_events.extend(self.next_module.ingest_entity(entity, event.event_time))
 
         return next_events
+
+
+@dataclass
+class DecideTwoWayByConditionModule(IngestModule):
+    true_next_module: IngestModule
+    false_next_module: IngestModule
+    condition_handler: Callable[[dict, dict], bool]
+    module_ind: int = field(default_factory=count().__next__)
+
+    def ingest_entity(self, entity: Entity, ingest_time: float) -> List[Event]:
+        """
+        Generate decide two-way by condition event
+
+        :param entity: ingested entity
+        :param ingest_time: system time at ingest event
+        """
+
+        return [Event(
+            event_time=ingest_time,
+            event_name='Decide Two-Way By Condition',
+            event_message=f'{entity.entity_type} {entity.entity_ind} entity decided two-way path by condition',
+            event_handler=self.process_event,
+            event_entity=entity
+        )]
+
+    def process_event(self, event: Event, sys_var: dict) -> List[Event]:
+        """
+        Process event at Decide two-way by condition Module, pass to next module
+
+        :param event: event to process
+        :param sys_var: system global variables
+        """
+
+        logging.debug(event)
+
+        event_entity_ind = event.event_entity.entity_ind
+        sys_var['entity']['trace'][event_entity_ind].append((f'Exit {self.name}', event.event_time))
+
+        if isinstance(event.event_entity, BatchEntity):
+            for entity in event.event_entity.batched_entities:
+                entity_ind = entity.entity_ind
+                sys_var['entity']['trace'][entity_ind].append((f'Exit {self.name}', event.event_time))
+
+        if self.condition_handler(sys_var['variables'], event.event_entity.attr):
+            return self.true_next_module.ingest_entity(event.event_entity, event.event_time)
+        else:
+            return self.false_next_module.ingest_entity(event.event_entity, event.event_time)
 
 
 @dataclass

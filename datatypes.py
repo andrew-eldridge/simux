@@ -46,17 +46,16 @@ class CostType(str, Enum):
     OTHER = 'Other'
 
 
+class BatchType(Enum):
+    ANY = 1
+    ATTRIBUTE = 2
+
+
 @dataclass
 class Assignment:
     assign_type: AssignType
     assign_name: str
     assign_value_handler: Optional[Callable[[dict, dict], any]]
-
-
-@dataclass
-class BatchType(str, Enum):
-    ANY = 'ANY'
-    ATTRIBUTE = 'ATTRIBUTE'
 
 
 @dataclass
@@ -138,7 +137,7 @@ class Resource:
 
         # check if there are enough resources for next entity in queue, if so seize resources
         if len(self.queue) != 0:
-            _, required_resources, _, next_entity, event_handler = self.queue[0]
+            queue_entry_time, required_resources, _, next_entity, event_handler = self.queue[0]
             if required_resources <= self.available:
                 self.seize(num_resources, release_time)
                 heapq.heappop(self.queue)
@@ -147,7 +146,10 @@ class Resource:
                     event_name='Seize',
                     event_message=f'{next_entity.entity_type} {next_entity.entity_ind} entity seized {required_resources} {self.name} resources',
                     event_handler=event_handler,
-                    event_entity=next_entity
+                    event_entity=next_entity,
+                    attr={
+                        'wait_time': release_time - queue_entry_time
+                    }
                 )
         return None
 
