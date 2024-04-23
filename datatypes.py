@@ -7,6 +7,7 @@ Custom type definitions
 from __future__ import annotations
 
 import heapq
+from uuid import UUID, uuid4
 from itertools import count
 from enum import Enum
 from dataclasses import dataclass, field
@@ -37,11 +38,25 @@ class AssignType(str, Enum):
     ENTITY_TYPE = 'ENTITY TYPE'
 
 
+class CostType(str, Enum):
+    VALUE_ADDED = 'Value-Added'
+    NON_VALUE_ADDED = 'Non-Value-Added'
+    TRANSFER = 'Transfer'
+    WAIT = 'Wait'
+    OTHER = 'Other'
+
+
 @dataclass
 class Assignment:
     assign_type: AssignType
     assign_name: str
-    assign_value: Optional[object]
+    assign_value_handler: Optional[Callable[[dict, dict], any]]
+
+
+@dataclass
+class BatchType(str, Enum):
+    ANY = 'ANY'
+    ATTRIBUTE = 'ATTRIBUTE'
 
 
 @dataclass
@@ -49,7 +64,14 @@ class Entity:
     entity_type: str
     arrival_time: float
     entity_ind: int = field(default_factory=count().__next__)
+    serial: UUID = field(default_factory=uuid4)
     attr: dict = field(default_factory=dict)
+
+
+@dataclass
+class BatchEntity(Entity):
+    is_permanent: bool = True
+    batched_entities: List[Entity] = field(default_factory=list)
 
 
 @dataclass
@@ -57,7 +79,7 @@ class Event:
     event_time: float
     event_name: str
     event_message: str
-    event_handler: Callable[[Event, dict, dict], List[Event]]
+    event_handler: Callable[[Event, dict], List[Event]]
     event_entity: Entity
     attr: dict = field(default_factory=dict)
 

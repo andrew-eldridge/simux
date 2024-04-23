@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable, Generator, List, Tuple, Optional
 from itertools import count
+from collections import deque
 
 from datatypes import *
 
@@ -19,13 +20,12 @@ class Module(ABC):
     name: str
 
     @abstractmethod
-    def process_event(self, event: Event, sys_var: dict, sys_entity_attr: dict) -> List[Event]:
+    def process_event(self, event: Event, sys_var: dict) -> List[Event]:
         """
         Process module event and pass entity to next module in the chain
 
         :param event: event to process
         :param sys_var: system global variables
-        :param sys_entity_attr: system global entity attributes
         """
         ...
 
@@ -53,18 +53,22 @@ class IngestModule(Module):
         ...
 
 
-def update_sys_entity_attr(sys_entity_attr: dict, entity_ind: int, updated_attr: dict):
+def init_sys_var_entity(sys_var: dict, entity_ind: int):
     """
-    Update system global entity attributes on target entity from attr update dictionary
+    Initialize entity entry in system global variables dict
 
-    :param sys_entity_attr: system global entity attributes
-    :param entity_ind: entity index to update
-    :param updated_attr: attr update dictionary
+    :param sys_var: system global variables
+    :param entity_ind: entity index
     """
 
-    if entity_ind not in sys_entity_attr:
-        sys_entity_attr[entity_ind] = {}
-    sys_entity_attr[entity_ind].update(updated_attr)
+    sys_var['entity']['metrics'][entity_ind] = {
+        'Value-Added Time': 0.,
+        'Non-Value-Added Time': 0.,
+        'Wait Time': 0.,
+        'Transfer Time': 0.,
+        'Other Time': 0.
+    }
+    sys_var['entity']['trace'][entity_ind] = []
 
 
 @dataclass
@@ -100,21 +104,20 @@ class CreateModule(ArrivalModule):
             ))
         return arrival_events
 
-    def process_event(self, event: Event, sys_var: dict, sys_entity_attr: dict) -> List[Event]:
+    def process_event(self, event: Event, sys_var: dict) -> List[Event]:
         """
         Process event at Create Module, pass to next module
 
         :param event: event to process
         :param sys_var: system global variables
-        :param sys_entity_attr: system global entity attributes
         """
 
         logging.debug(event)
 
-        update_sys_entity_attr(sys_entity_attr, event.event_entity.entity_ind, {
-            'create_time': event.event_time,
-            f'create_{self.module_ind}_exit_time': event.event_time
-        })
+        event_entity_ind = event.event_entity.entity_ind
+        init_sys_var_entity(sys_var, event_entity_ind)
+        sys_var['entity']['metrics'][event_entity_ind]['Created At'] = event.event_time
+        sys_var['entity']['trace'][event_entity_ind].append((f'Exit Create {self.module_ind}', event.event_time))
 
         return self.next_module.ingest_entity(event.event_entity, event.event_time)
 
@@ -147,20 +150,23 @@ class SeizeModule(IngestModule):
                 event_entity=entity
             )]
 
-    def process_event(self, event: Event, sys_var: dict, sys_entity_attr: dict) -> List[Event]:
+    def process_event(self, event: Event, sys_var: dict) -> List[Event]:
         """
         Process event at Seize Module, pass to next module
 
         :param event: event to process
         :param sys_var: system global variables
-        :param sys_entity_attr: system global entity attributes
         """
 
         logging.debug(event)
 
-        update_sys_entity_attr(sys_entity_attr, event.event_entity.entity_ind, {
-            f'seize_{self.module_ind}_exit_time': event.event_time
-        })
+        event_entity_ind = event.event_entity.entity_ind
+        sys_var['entity']['trace'][event_entity_ind].append((f'Exit Seize {self.module_ind}', event.event_time))
+
+        if isinstance(event.event_entity, BatchEntity):
+            for entity in event.event_entity.batched_entities:
+                entity_ind = entity.entity_ind
+                sys_var['entity']['trace'][entity_ind].append((f'Exit Seize {self.module_ind}', event.event_time))
 
         return self.next_module.ingest_entity(event.event_entity, event.event_time)
 
@@ -169,6 +175,7 @@ class SeizeModule(IngestModule):
 class DelayModule(IngestModule):
     next_module: IngestModule
     delay_generator: Generator[float, None, None]
+    cost_allocation: CostType = CostType.VALUE_ADDED
     module_ind: int = field(default_factory=count().__next__)
 
     def ingest_entity(self, entity: Entity, ingest_time: float) -> List[Event]:
@@ -179,28 +186,37 @@ class DelayModule(IngestModule):
         :param ingest_time: system time at ingest event
         """
 
+        delay_time = next(self.delay_generator)
         return [Event(
-            event_time=ingest_time + next(self.delay_generator),
+            event_time=ingest_time + delay_time,
             event_name='Delay',
             event_message=f'{entity.entity_type} {entity.entity_ind} entity completed delay',
             event_handler=self.process_event,
-            event_entity=entity
+            event_entity=entity,
+            attr={
+                'delay_time': delay_time
+            }
         )]
 
-    def process_event(self, event: Event, sys_var: dict, sys_entity_attr: dict) -> List[Event]:
+    def process_event(self, event: Event, sys_var: dict) -> List[Event]:
         """
         Process event at Delay Module, pass to next module
 
         :param event: event to process
         :param sys_var: system global variables
-        :param sys_entity_attr: system global entity attributes
         """
 
         logging.debug(event)
 
-        update_sys_entity_attr(sys_entity_attr, event.event_entity.entity_ind, {
-            f'delay_{self.module_ind}_exit_time': event.event_time
-        })
+        event_entity_ind = event.event_entity.entity_ind
+        sys_var['entity']['metrics'][event_entity_ind][f'{self.cost_allocation.value} Time'] += event.attr['delay_time']
+        sys_var['entity']['trace'][event_entity_ind].append((f'Exit Delay {self.module_ind}', event.event_time))
+
+        if isinstance(event.event_entity, BatchEntity):
+            for entity in event.event_entity.batched_entities:
+                entity_ind = entity.entity_ind
+                sys_var['entity']['metrics'][entity_ind][f'{self.cost_allocation.value} Time'] += event.attr['delay_time']
+                sys_var['entity']['trace'][entity_ind].append((f'Exit Delay {self.module_ind}', event.event_time))
 
         return self.next_module.ingest_entity(event.event_entity, event.event_time)
 
@@ -236,20 +252,23 @@ class ReleaseModule(IngestModule):
         ))
         return events
 
-    def process_event(self, event: Event, sys_var: dict, sys_entity_attr: dict) -> List[Event]:
+    def process_event(self, event: Event, sys_var: dict) -> List[Event]:
         """
         Process event at Release Module, pass to next module
 
         :param event: event to process
         :param sys_var: system global variables
-        :param sys_entity_attr: system global entity attributes
         """
 
         logging.debug(event)
 
-        update_sys_entity_attr(sys_entity_attr, event.event_entity.entity_ind, {
-            f'release_{self.module_ind}_exit_time': event.event_time
-        })
+        event_entity_ind = event.event_entity.entity_ind
+        sys_var['entity']['trace'][event_entity_ind].append((f'Exit Release {self.module_ind}', event.event_time))
+
+        if isinstance(event.event_entity, BatchEntity):
+            for entity in event.event_entity.batched_entities:
+                entity_ind = entity.entity_ind
+                sys_var['entity']['trace'][entity_ind].append((f'Exit Release {self.module_ind}', event.event_time))
 
         return self.next_module.ingest_entity(event.event_entity, event.event_time)
 
@@ -268,14 +287,8 @@ class AssignModule(IngestModule):
         :param ingest_time: system time at ingest event
         """
 
-        assignments_str_lst = [f'[{assignment.assign_type.value}]' for assignment in self.assignments]
-        for assignment in self.assignments:
-            if assignment.assign_type == AssignType.ENTITY_TYPE:
-                assignments_str_lst.append(f'[ENTITY TYPE] {assignment.assign_name}')
-            else:
-                assignments_str_lst.append(f'[{assignment.assign_type.value}] {assignment.assign_name}:{assignment.assign_value}')
-        assignments_str = ', '.join(assignments_str_lst)
-        assign_event_msg = f'{entity.entity_type} {entity.entity_ind} entity performed assignments: {assignments_str}'
+        assignment_names = ', '.join([assignment.assign_name for assignment in self.assignments])
+        assign_event_msg = f'{entity.entity_type} {entity.entity_ind} entity performed assignments: {assignment_names}'
 
         return [Event(
             event_time=ingest_time,
@@ -285,30 +298,258 @@ class AssignModule(IngestModule):
             event_entity=entity
         )]
 
-    def process_event(self, event: Event, sys_var: dict, sys_entity_attr: dict) -> List[Event]:
+    def process_event(self, event: Event, sys_var: dict) -> List[Event]:
         """
         Process event at Assign Module, pass to next module
 
         :param event: event to process
         :param sys_var: system global variables
-        :param sys_entity_attr: system global entity attributes
         """
 
         logging.debug(event)
 
-        sys_entity_attr_updates = {}
         for assignment in self.assignments:
             if assignment.assign_type == AssignType.VARIABLE:
-                sys_entity_attr_updates[assignment.assign_name] = assignment.assign_value
+                sys_var['variables'][assignment.assign_name] = assignment.assign_value_handler(sys_var['variables'], event.event_entity.attr)
             elif assignment.assign_type == AssignType.ATTRIBUTE:
-                event.event_entity.attr[assignment.assign_name] = assignment.assign_value
+                event.event_entity.attr[assignment.assign_name] = assignment.assign_value_handler(sys_var['variables'], event.event_entity.attr)
             elif assignment.assign_type == AssignType.ENTITY_TYPE:
                 event.event_entity.entity_type = assignment.assign_name
+            else:
+                raise ValueError(f'Invalid AssignType: {assignment.assign_type}')
 
-        sys_entity_attr_updates[f'assign_{self.module_ind}_exit_time'] = event.event_time
-        update_sys_entity_attr(sys_entity_attr, event.event_entity.entity_ind, sys_entity_attr_updates)
+        event_entity_ind = event.event_entity.entity_ind
+        sys_var['entity']['trace'][event_entity_ind].append((f'Exit Assign {self.module_ind}', event.event_time))
+
+        if isinstance(event.event_entity, BatchEntity):
+            for entity in event.event_entity.batched_entities:
+                entity_ind = entity.entity_ind
+                sys_var['entity']['trace'][entity_ind].append((f'Exit Assign {self.module_ind}', event.event_time))
 
         return self.next_module.ingest_entity(event.event_entity, event.event_time)
+
+
+@dataclass
+class DuplicateModule(IngestModule):
+    next_module_orig: IngestModule
+    next_module_dup: IngestModule
+    module_ind: int = field(default_factory=count().__next__)
+
+    def ingest_entity(self, entity: Entity, ingest_time: float) -> List[Event]:
+        """
+        Generate duplicate entity event
+
+        :param entity: ingested entity
+        :param ingest_time: system time at ingest event
+        """
+
+        if isinstance(entity, BatchEntity):
+            raise TypeError(f'Invalid entity type provided to Duplicate Module. Expected: Entity. Received: BatchEntity.')
+
+        return [Event(
+            event_time=ingest_time,
+            event_name='Duplicate',
+            event_message=f'{entity.entity_type} {entity.entity_ind} entity duplicated',
+            event_handler=self.process_event,
+            event_entity=entity
+        )]
+
+    def process_event(self, event: Event, sys_var: dict) -> List[Event]:
+        """
+        Process event at Duplicate Module, pass to next modules
+
+        :param event: event to process
+        :param sys_var: system global variables
+        """
+
+        logging.debug(event)
+
+        # create duplicate entity with same serial and different entity_ind
+        orig_entity = event.event_entity
+        dup_entity = Entity(
+            entity_type=orig_entity.entity_type,
+            arrival_time=event.event_time,
+            serial=orig_entity.serial,
+            attr=orig_entity.attr
+        )
+
+        # entity trace and metrics updates
+        event_entity_ind = event.event_entity.entity_ind
+        sys_var['entity']['trace'][event_entity_ind].append((f'Exit Duplicate {self.module_ind}', event.event_time))
+
+        dup_entity_ind = dup_entity.entity_ind
+        init_sys_var_entity(sys_var, dup_entity_ind)
+        sys_var['entity']['metrics'][dup_entity_ind]['Created At'] = event.event_time
+        sys_var['entity']['trace'][dup_entity_ind].append((f'Exit Duplicate {self.module_ind}', event.event_time))
+
+        # retrieve next events for orig and dup entities
+        next_events = self.next_module_orig.ingest_entity(orig_entity, event.event_time)
+        next_events.extend(self.next_module_dup.ingest_entity(dup_entity, event.event_time))
+
+        return next_events
+
+
+@dataclass
+class BatchModule(IngestModule):
+    next_module: IngestModule
+    batch_type: BatchType
+    batch_size: int
+    batch_attr: Optional[str] = None
+    batch_entity_type: Optional[str] = None
+    queue: deque[Tuple[Entity, float]] = field(default_factory=deque)
+    module_ind: int = field(default_factory=count().__next__)
+
+    def ingest_entity(self, entity: Entity, ingest_time: float) -> List[Event]:
+        """
+        Generate batch entity event if a match is queued, otherwise queue ingested entity
+
+        :param entity: ingested entity
+        :param ingest_time: system time at ingest event
+        """
+
+        if isinstance(entity, BatchEntity):
+            raise TypeError(f'Invalid entity type provided to Batch Module. Expected: Entity. Received: BatchEntity.')
+
+        if self.batch_type == BatchType.ATTRIBUTE:
+            needed_to_batch = self.batch_size - 1
+            match_indices = []
+
+            # search queue for matching entities to batch by attribute
+            for i, (q_entity, _) in enumerate(self.queue):
+                if self.batch_attr in q_entity.attr and self.batch_attr in entity.attr and \
+                        q_entity.attr[self.batch_attr] == entity.attr[self.batch_attr]:
+                    match_indices.append(i)
+                    needed_to_batch -= 1
+                    if needed_to_batch == 0:
+                        break
+
+            if needed_to_batch == 0:
+                # sufficient matches found in queue, remove matches from queue and return batch event
+                batch_entities: List[Entity] = [entity]
+                for i in match_indices:
+                    batch_entities.append(self.queue[i][0])
+                for i in match_indices:
+                    del self.queue[i]
+
+                event_msg = 'Batched entities: '
+                event_msg += ', '.join([f'{e.entity_type} {e.entity_ind}' for e in batch_entities])
+                return [Event(
+                    event_time=ingest_time,
+                    event_name='Batch',
+                    event_message=event_msg,
+                    event_handler=self.process_event,
+                    event_entity=entity,
+                    attr={
+                        'batch_entities': batch_entities
+                    }
+                )]
+            else:
+                # not enough matches found in queue, add ingested entity to queue
+                self.queue.append((entity, ingest_time))
+                return []
+
+        elif self.batch_type == BatchType.ANY:
+            if len(self.queue) < self.batch_size - 1:
+                # sufficient entities in queue, remove batch_size-1 items from queue and return batch event
+                batch_entities: List[Entity] = [entity]
+                for _ in range(self.batch_size - 1):
+                    batch_entities.append(self.queue.popleft()[0])
+
+                event_msg = 'Batched entities: '
+                event_msg += ', '.join([f'{e.entity_type} {e.entity_ind}' for e in batch_entities])
+                return [Event(
+                    event_time=ingest_time,
+                    event_name='Batch',
+                    event_message=event_msg,
+                    event_handler=self.process_event,
+                    event_entity=entity,
+                    attr={
+                        'batch_entities': batch_entities
+                    }
+                )]
+            else:
+                # not enough entities in queue, add ingested entity to queue
+                self.queue.append((entity, ingest_time))
+                return []
+        else:
+            raise ValueError(f'Invalid BatchType: {self.batch_type}')
+
+    def process_event(self, event: Event, sys_var: dict) -> List[Event]:
+        """
+        Process event at Batch Module, pass to next module
+
+        :param event: event to process
+        :param sys_var: system global variables
+        """
+
+        logging.debug(event)
+
+        # combine entities into a single batch entity
+        batch_entity = BatchEntity(
+            entity_type=self.batch_entity_type or event.event_entity.entity_type,
+            arrival_time=event.event_time,
+            batched_entities=event.attr['batch_entities']
+        )
+
+        batch_entity_ind = batch_entity.entity_ind
+        init_sys_var_entity(sys_var, batch_entity_ind)
+        sys_var['entity']['metrics'][batch_entity_ind]['Created At'] = event.event_time
+        sys_var['entity']['trace'][batch_entity_ind].append((f'Exit Batch {self.module_ind}', event.event_time))
+
+        for entity in batch_entity.batched_entities:
+            entity_ind = entity.entity_ind
+            sys_var['entity']['trace'][entity_ind].append((f'Exit Batch {self.module_ind}', event.event_time))
+
+        return self.next_module.ingest_entity(batch_entity, event.event_time)
+
+
+@dataclass
+class SeparateModule(IngestModule):
+    next_module: IngestModule
+    module_ind: int = field(default_factory=count().__next__)
+
+    def ingest_entity(self, entity: Entity, ingest_time: float) -> List[Event]:
+        """
+        Generate separate batch entity event
+
+        :param entity: ingested batch entity
+        :param ingest_time: system time at ingest event
+        """
+
+        if not isinstance(entity, BatchEntity):
+            raise TypeError(f'Invalid entity type provided to Separate Module. Expected: BatchEntity. Received: {type(entity)}.')
+
+        return [Event(
+            event_time=ingest_time,
+            event_name='Separate',
+            event_message=f'{entity.entity_type} {entity.entity_ind} entity separated',
+            event_handler=self.process_event,
+            event_entity=entity
+        )]
+
+    def process_event(self, event: Event, sys_var: dict) -> List[Event]:
+        """
+        Process event at Separate Module, pass to next module
+
+        :param event: event to process
+        :param sys_var: system global variables
+        """
+
+        logging.debug(event)
+
+        assert isinstance(event.event_entity, BatchEntity)
+
+        batch_entity_ind = event.event_entity.entity_ind
+        sys_var['entity']['metrics'][batch_entity_ind]['Disposed At'] = event.event_time
+        sys_var['entity']['trace'][batch_entity_ind].append((f'Exit Separate {self.module_ind}', event.event_time))
+
+        next_events = []
+        for entity in event.event_entity.batched_entities:
+            entity_ind = entity.entity_ind
+            sys_var['entity']['trace'][entity_ind].append((f'Exit Separate {self.module_ind}', event.event_time))
+            next_events.extend(self.next_module.ingest_entity(entity, event.event_time))
+
+        return next_events
 
 
 @dataclass
@@ -331,20 +572,24 @@ class DisposeModule(IngestModule):
             event_entity=entity
         )]
 
-    def process_event(self, event: Event, sys_var: dict, sys_entity_attr: dict) -> List[Event]:
+    def process_event(self, event: Event, sys_var: dict) -> List[Event]:
         """
         Process event at Dispose Module, pass to next module
 
         :param event: event to process
         :param sys_var: system global variables
-        :param sys_entity_attr: system global entity attributes
         """
 
         logging.debug(event)
 
-        update_sys_entity_attr(sys_entity_attr, event.event_entity.entity_ind, {
-            f'dispose_{self.module_ind}_exit_time': event.event_time,
-            'dispose_time': event.event_time
-        })
+        event_entity_ind = event.event_entity.entity_ind
+        sys_var['entity']['metrics'][event_entity_ind]['Disposed At'] = event.event_time
+        sys_var['entity']['trace'][event_entity_ind].append((f'Exit Dispose {self.module_ind}', event.event_time))
+
+        if isinstance(event.event_entity, BatchEntity):
+            for entity in event.event_entity.batched_entities:
+                entity_ind = entity.entity_ind
+                sys_var['entity']['metrics'][entity_ind]['Disposed At'] = event.event_time
+                sys_var['entity']['trace'][entity_ind].append((f'Exit Dispose {self.module_ind}', event.event_time))
 
         return []
