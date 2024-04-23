@@ -248,7 +248,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--case', type=int, default=4, help='Test case number (1, 2, 3, 4).')
     parser.add_argument('-d', '--debug', action='store_true', help='Flag for debugging outputs.')
-    parser.add_argument('-D', '--duration', type=float, default=100., help='Duration of simulation in default time units.')
+    parser.add_argument('-D', '--duration', type=float, default=1000., help='Duration of simulation in default time units.')
     args = parser.parse_args()
 
     if args.debug:
@@ -267,15 +267,23 @@ def main():
             raise ValueError('Invalid test case number provided:', args.case)
 
     sys_var, sys_entity_metrics_df = env.run_simulation(args.duration)
+    entity_traces = sys_var['entity']['trace']
 
     # system metric outputs
     print(sys_entity_metrics_df)
     print('Total entity system time:', sys_var['metrics']['Total Entity System Time'])
+    print('Average entity system time:', sys_var['metrics']['Average Entity System Time'])
 
     # resource metric outputs
     for r in resources:
         resource_utilization = r.calc_utilization(args.duration)
         print(f'{r.name} resource utilization:', resource_utilization)
+
+    # sample entity trace
+    mid_ind = len(sys_var['entity']['metrics'].keys()) // 2
+    print(f'Sample entity trace (Entity {mid_ind}):')
+    for step in entity_traces[mid_ind]:
+        print(step)
 
 
 if __name__ == '__main__':

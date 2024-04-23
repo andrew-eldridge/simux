@@ -117,7 +117,7 @@ class CreateModule(ArrivalModule):
         event_entity_ind = event.event_entity.entity_ind
         init_sys_var_entity(sys_var, event_entity_ind)
         sys_var['entity']['metrics'][event_entity_ind]['Created At'] = event.event_time
-        sys_var['entity']['trace'][event_entity_ind].append((f'Exit Create {self.module_ind}', event.event_time))
+        sys_var['entity']['trace'][event_entity_ind].append((f'Exit {self.name}', event.event_time))
 
         return self.next_module.ingest_entity(event.event_entity, event.event_time)
 
@@ -161,12 +161,12 @@ class SeizeModule(IngestModule):
         logging.debug(event)
 
         event_entity_ind = event.event_entity.entity_ind
-        sys_var['entity']['trace'][event_entity_ind].append((f'Exit Seize {self.module_ind}', event.event_time))
+        sys_var['entity']['trace'][event_entity_ind].append((f'Exit {self.name}', event.event_time))
 
         if isinstance(event.event_entity, BatchEntity):
             for entity in event.event_entity.batched_entities:
                 entity_ind = entity.entity_ind
-                sys_var['entity']['trace'][entity_ind].append((f'Exit Seize {self.module_ind}', event.event_time))
+                sys_var['entity']['trace'][entity_ind].append((f'Exit {self.name}', event.event_time))
 
         return self.next_module.ingest_entity(event.event_entity, event.event_time)
 
@@ -210,13 +210,13 @@ class DelayModule(IngestModule):
 
         event_entity_ind = event.event_entity.entity_ind
         sys_var['entity']['metrics'][event_entity_ind][f'{self.cost_allocation.value} Time'] += event.attr['delay_time']
-        sys_var['entity']['trace'][event_entity_ind].append((f'Exit Delay {self.module_ind}', event.event_time))
+        sys_var['entity']['trace'][event_entity_ind].append((f'Exit {self.name}', event.event_time))
 
         if isinstance(event.event_entity, BatchEntity):
             for entity in event.event_entity.batched_entities:
                 entity_ind = entity.entity_ind
                 sys_var['entity']['metrics'][entity_ind][f'{self.cost_allocation.value} Time'] += event.attr['delay_time']
-                sys_var['entity']['trace'][entity_ind].append((f'Exit Delay {self.module_ind}', event.event_time))
+                sys_var['entity']['trace'][entity_ind].append((f'Exit {self.name}', event.event_time))
 
         return self.next_module.ingest_entity(event.event_entity, event.event_time)
 
@@ -263,12 +263,12 @@ class ReleaseModule(IngestModule):
         logging.debug(event)
 
         event_entity_ind = event.event_entity.entity_ind
-        sys_var['entity']['trace'][event_entity_ind].append((f'Exit Release {self.module_ind}', event.event_time))
+        sys_var['entity']['trace'][event_entity_ind].append((f'Exit {self.name}', event.event_time))
 
         if isinstance(event.event_entity, BatchEntity):
             for entity in event.event_entity.batched_entities:
                 entity_ind = entity.entity_ind
-                sys_var['entity']['trace'][entity_ind].append((f'Exit Release {self.module_ind}', event.event_time))
+                sys_var['entity']['trace'][entity_ind].append((f'Exit {self.name}', event.event_time))
 
         return self.next_module.ingest_entity(event.event_entity, event.event_time)
 
@@ -319,12 +319,12 @@ class AssignModule(IngestModule):
                 raise ValueError(f'Invalid AssignType: {assignment.assign_type}')
 
         event_entity_ind = event.event_entity.entity_ind
-        sys_var['entity']['trace'][event_entity_ind].append((f'Exit Assign {self.module_ind}', event.event_time))
+        sys_var['entity']['trace'][event_entity_ind].append((f'Exit {self.name}', event.event_time))
 
         if isinstance(event.event_entity, BatchEntity):
             for entity in event.event_entity.batched_entities:
                 entity_ind = entity.entity_ind
-                sys_var['entity']['trace'][entity_ind].append((f'Exit Assign {self.module_ind}', event.event_time))
+                sys_var['entity']['trace'][entity_ind].append((f'Exit {self.name}', event.event_time))
 
         return self.next_module.ingest_entity(event.event_entity, event.event_time)
 
@@ -375,12 +375,12 @@ class DuplicateModule(IngestModule):
 
         # entity trace and metrics updates
         event_entity_ind = event.event_entity.entity_ind
-        sys_var['entity']['trace'][event_entity_ind].append((f'Exit Duplicate {self.module_ind}', event.event_time))
+        sys_var['entity']['trace'][event_entity_ind].append((f'Exit {self.name}', event.event_time))
 
         dup_entity_ind = dup_entity.entity_ind
         init_sys_var_entity(sys_var, dup_entity_ind)
         sys_var['entity']['metrics'][dup_entity_ind]['Created At'] = event.event_time
-        sys_var['entity']['trace'][dup_entity_ind].append((f'Exit Duplicate {self.module_ind}', event.event_time))
+        sys_var['entity']['trace'][dup_entity_ind].append((f'Exit {self.name}', event.event_time))
 
         # retrieve next events for orig and dup entities
         next_events = self.next_module_orig.ingest_entity(orig_entity, event.event_time)
@@ -494,11 +494,11 @@ class BatchModule(IngestModule):
         batch_entity_ind = batch_entity.entity_ind
         init_sys_var_entity(sys_var, batch_entity_ind)
         sys_var['entity']['metrics'][batch_entity_ind]['Created At'] = event.event_time
-        sys_var['entity']['trace'][batch_entity_ind].append((f'Exit Batch {self.module_ind}', event.event_time))
+        sys_var['entity']['trace'][batch_entity_ind].append((f'Exit {self.name}', event.event_time))
 
         for entity in batch_entity.batched_entities:
             entity_ind = entity.entity_ind
-            sys_var['entity']['trace'][entity_ind].append((f'Exit Batch {self.module_ind}', event.event_time))
+            sys_var['entity']['trace'][entity_ind].append((f'Exit {self.name}', event.event_time))
 
         return self.next_module.ingest_entity(batch_entity, event.event_time)
 
@@ -541,12 +541,12 @@ class SeparateModule(IngestModule):
 
         batch_entity_ind = event.event_entity.entity_ind
         sys_var['entity']['metrics'][batch_entity_ind]['Disposed At'] = event.event_time
-        sys_var['entity']['trace'][batch_entity_ind].append((f'Exit Separate {self.module_ind}', event.event_time))
+        sys_var['entity']['trace'][batch_entity_ind].append((f'Exit {self.name}', event.event_time))
 
         next_events = []
         for entity in event.event_entity.batched_entities:
             entity_ind = entity.entity_ind
-            sys_var['entity']['trace'][entity_ind].append((f'Exit Separate {self.module_ind}', event.event_time))
+            sys_var['entity']['trace'][entity_ind].append((f'Exit {self.name}', event.event_time))
             next_events.extend(self.next_module.ingest_entity(entity, event.event_time))
 
         return next_events
@@ -584,12 +584,12 @@ class DisposeModule(IngestModule):
 
         event_entity_ind = event.event_entity.entity_ind
         sys_var['entity']['metrics'][event_entity_ind]['Disposed At'] = event.event_time
-        sys_var['entity']['trace'][event_entity_ind].append((f'Exit Dispose {self.module_ind}', event.event_time))
+        sys_var['entity']['trace'][event_entity_ind].append((f'Exit {self.name}', event.event_time))
 
         if isinstance(event.event_entity, BatchEntity):
             for entity in event.event_entity.batched_entities:
                 entity_ind = entity.entity_ind
                 sys_var['entity']['metrics'][entity_ind]['Disposed At'] = event.event_time
-                sys_var['entity']['trace'][entity_ind].append((f'Exit Dispose {self.module_ind}', event.event_time))
+                sys_var['entity']['trace'][entity_ind].append((f'Exit {self.name}', event.event_time))
 
         return []

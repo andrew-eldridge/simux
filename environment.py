@@ -82,5 +82,6 @@ class Environment:
         sys_entity_metrics_df = pd.DataFrame.from_dict(self.sys_var['entity']['metrics'], orient='index')
         sys_entity_metrics_df['Time in System'] = sys_entity_metrics_df['Disposed At'] - sys_entity_metrics_df['Created At']
         self.sys_var['metrics']['Total Entity System Time'] = sum(sys_entity_metrics_df['Time in System'].dropna())
+        self.sys_var['metrics']['Average Entity System Time'] = self.sys_var['metrics']['Total Entity System Time'] / len(self.sys_var['entity']['metrics'].keys())
 
         return self.sys_var, sys_entity_metrics_df
