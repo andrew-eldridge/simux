@@ -16,26 +16,20 @@ def testcase_1() -> Tuple[Environment, List[Resource]]:
     Minimal test case; simple Create and Dispose simulation
     """
 
-    server = Resource(
-        name='Server',
-        capacity=3
-    )
-
     mod_chain = CreateModule(
         name='Test Create',
+        gen_entity_type='Test Entity',
+        arrival_generator=exp_agg_generator(1),
         next_module=DisposeModule(
             name='Test Dispose'
-        ),
-        gen_entity_type='Test Entity',
-        arrival_generator=exp_agg_generator(1)
+        )
     )
 
     env = Environment(
         module_chains=[mod_chain]
     )
-    resources = [server]
 
-    return env, resources
+    return env, []
 
 
 def testcase_2() -> Tuple[Environment, List[Resource]]:
@@ -50,25 +44,25 @@ def testcase_2() -> Tuple[Environment, List[Resource]]:
 
     mod_chain = CreateModule(
         name='Test Create',
+        gen_entity_type='Test',
+        arrival_generator=exp_agg_generator(1),
         next_module=SeizeModule(
             name='Test Seize',
+            resource=server,
+            num_resources=1,
             next_module=DelayModule(
                 name='Test Delay',
+                delay_generator=exp_generator(1),
                 next_module=ReleaseModule(
                     name='Test Release',
+                    resource=server,
+                    num_resources=1,
                     next_module=DisposeModule(
                         name='Test Dispose'
-                    ),
-                    resource=server,
-                    num_resources=1
-                ),
-                delay_generator=exp_generator(1)
-            ),
-            resource=server,
-            num_resources=1
-        ),
-        gen_entity_type='Test',
-        arrival_generator=exp_agg_generator(1)
+                    )
+                )
+            )
+        )
     )
 
     env = Environment(
@@ -276,7 +270,7 @@ def testcase_5() -> Tuple[Environment, List[Resource]]:
     )
 
     batch_mod_chain = BatchModule(
-        name='Re-Batch Couple',
+        name='Rejoin Couple',
         batch_type=BatchType.ATTRIBUTE,
         batch_size=2,
         batch_attr='couple_ind',
@@ -302,6 +296,40 @@ def testcase_5() -> Tuple[Environment, List[Resource]]:
     )
 
     mean_drive_time_generator = uniform_generator(1, 3)
+
+    store1_mod_chain = SeizeModule(
+        name='Seize Store 1 Clerk',
+        resource=clerk_store1,
+        num_resources=1,
+        next_module=DelayModule(
+            name='Delay Store 1 Checkout',
+            delay_generator=exp_generator(1),
+            cost_allocation=CostType.NON_VALUE_ADDED,
+            next_module=ReleaseModule(
+                name='Release Store 1 Clerk',
+                resource=clerk_store1,
+                num_resources=1,
+                next_module=batch_mod_chain
+            )
+        )
+    )
+
+    store2_mod_chain = SeizeModule(
+        name='Seize Store 2 Clerk',
+        resource=clerk_store2,
+        num_resources=1,
+        next_module=DelayModule(
+            name='Delay Store 2 Checkout',
+            delay_generator=tria_generator(1, 3.5),
+            cost_allocation=CostType.VALUE_ADDED,
+            next_module=ReleaseModule(
+                name='Release Store 2 Clerk',
+                resource=clerk_store2,
+                num_resources=1,
+                next_module=batch_mod_chain
+            )
+        )
+    )
 
     mod_chain = CreateModule(
         name='Create Person',
@@ -329,38 +357,8 @@ def testcase_5() -> Tuple[Environment, List[Resource]]:
                         next_module=DecideTwoWayByConditionModule(
                             name='Choose store to enter',
                             condition_handler=decide_store_handler,
-                            true_next_module=SeizeModule(
-                                name='Seize Store 1 Clerk',
-                                resource=clerk_store1,
-                                num_resources=1,
-                                next_module=DelayModule(
-                                    name='Delay Store 1 Checkout',
-                                    delay_generator=exp_generator(1),
-                                    cost_allocation=CostType.NON_VALUE_ADDED,
-                                    next_module=ReleaseModule(
-                                        name='Release Store 1 Clerk',
-                                        resource=clerk_store1,
-                                        num_resources=1,
-                                        next_module=batch_mod_chain
-                                    )
-                                )
-                            ),
-                            false_next_module=SeizeModule(
-                                name='Seize Store 2 Clerk',
-                                resource=clerk_store2,
-                                num_resources=1,
-                                next_module=DelayModule(
-                                    name='Delay Store 2 Checkout',
-                                    delay_generator=tria_generator(1, 3.5),
-                                    cost_allocation=CostType.VALUE_ADDED,
-                                    next_module=ReleaseModule(
-                                        name='Release Store 2 Clerk',
-                                        resource=clerk_store2,
-                                        num_resources=1,
-                                        next_module=batch_mod_chain
-                                    )
-                                )
-                            )
+                            true_next_module=store1_mod_chain,
+                            false_next_module=store2_mod_chain
                         )
                     )
                 )
