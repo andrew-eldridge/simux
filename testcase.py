@@ -39,7 +39,7 @@ def testcase_2() -> Tuple[Environment, List[Resource]]:
 
     server = Resource(
         name='Server',
-        capacity=3
+        capacity=1
     )
 
     mod_chain = CreateModule(
